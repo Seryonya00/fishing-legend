@@ -1,0 +1,79 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: "4.3"
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack FishingLegend.zip if project was uploaded as a zip
+        run: |
+          if [ ! -f project.godot ]; then unzip -oq FishingLegend.zip; fi
+          ls -la
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Godot and export templates
+        run: |
+          V="${GODOT_VERSION}-stable"
+          wget -q "https://github.com/godotengine/godot/releases/download/${V}/Godot_v${V}_linux.x86_64.zip"
+          wget -q "https://github.com/godotengine/godot/releases/download/${V}/Godot_v${V}_export_templates.tpz"
+          unzip -q "Godot_v${V}_linux.x86_64.zip"
+          sudo mv "Godot_v${V}_linux.x86_64" /usr/local/bin/godot
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          unzip -q "Godot_v${V}_export_templates.tpz" -d /tmp/tpl
+          mv /tmp/tpl/templates/* "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
+
+      - name: Android SDK, debug keystore, editor settings
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "build-tools;34.0.0" "platforms;android-34" > /dev/null || true
+          keytool -genkeypair -keystore "$PWD/debug.keystore" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p "$HOME/.config/godot"
+          for f in editor_settings-4.tres editor_settings-4.3.tres; do
+          cat > "$HOME/.config/godot/$f" <<SETTINGS
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$SDK"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$PWD/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          SETTINGS
+          done
+
+      - name: Import and export APK
+        run: |
+          godot --headless --import || true
+          mkdir -p build
+          godot --headless --export-debug "Android" build/FishingLegend.apk
+          ls -la build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FishingLegend-apk
+          path: build/FishingLegend.apk
+
+      - name: Publish APK as a release (direct download link)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Fishing Legend build ${{ github.run_number }}
+          prerelease: true
+          files: build/FishingLegend.apk

@@ -58,6 +58,9 @@ jobs:
           SETTINGS
           done
 
+      - name: Download optional CC0 assets (Poly Haven)
+        run: bash tools/fetch_assets.sh || true
+
       - name: Import and export APK
         run: |
           godot --headless --import || true
